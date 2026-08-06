@@ -1,0 +1,12 @@
+model:
+  model_name: "placeholder/model-name"
+
+lora:
+  lora_rank: 16
+  lora_alpha: 32
+
+training:
+  learning_rate: 2.0e-4
+  batch_size: 4
+  epochs: 3
+  max_seq_length: 2048
