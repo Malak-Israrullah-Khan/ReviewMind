@@ -1,12 +1,46 @@
 model:
-  model_name: "placeholder/model-name"
+  model_name: "meta-llama/Llama-3.1-8B-Instruct"
+
+quantization:
+  load_in_4bit: true
+  # nf4 (NormalFloat4) is the quantization type from QLoRA — better than int4
+  # for normally-distributed weights like those in LLMs
+  bnb_4bit_quant_type: "nf4"
+  # double quantization: quantize the quantization constants themselves,
+  # saving an extra ~0.4 bits/param
+  bnb_4bit_use_double_quant: true
+  # compute dtype is float16 for the forward/backward pass even though
+  # weights are stored in 4-bit
+  bnb_4bit_compute_dtype: "float16"
 
 lora:
   lora_rank: 16
-  lora_alpha: 32
+  lora_alpha: 32          # typically 2× rank; scales the LoRA update magnitude
+  lora_dropout: 0.05
+  # attention projection matrices — standard QLoRA targets for instruction tuning
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "k_proj"
+    - "o_proj"
 
 training:
   learning_rate: 2.0e-4
   batch_size: 4
+  gradient_accumulation_steps: 4   # effective batch size = 4×4 = 16
   epochs: 3
   max_seq_length: 2048
+  output_dir: "training/finetune/checkpoints"
+  warmup_ratio: 0.03
+  lr_scheduler_type: "cosine"
+  logging_steps: 10
+  save_steps: 100
+  eval_steps: 100
+  fp16: true
+
+data:
+  splits_dir: "data/splits"
+  train_file: "train.jsonl"
+  validation_file: "validation.jsonl"
+  test_file: "test.jsonl"
+  text_column: "text"
