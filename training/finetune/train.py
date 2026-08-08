@@ -352,9 +352,6 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         processing_class=tokenizer,
-        # packing=False: do not concatenate short examples across sequence
-        # boundaries — cleaner for variable-length code reviews
-        packing=False,
     )
 
     return trainer
