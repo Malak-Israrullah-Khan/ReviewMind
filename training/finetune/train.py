@@ -341,7 +341,7 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         dataset_text_field=dcfg["text_column"],
         max_seq_length=tcfg["max_seq_length"],
         # packing=False: do not concatenate short examples across sequence
