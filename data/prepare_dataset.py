@@ -29,15 +29,17 @@ from datasets import load_dataset
 # Constants
 # ---------------------------------------------------------------------------
 
-DATASET_NAME   = "fasterinnerlooper/codereviewer"
-# This is a publicly accessible mirror of the Microsoft CodeReviewer corpus.
-# It ships as a flat dataset (no named sub-configs) with columns:
-#   patch  – unified diff of the code change
-#   msg    – the human reviewer's comment
-#   label  – 1 if the patch received a comment, 0 otherwise
-#   url    – link to the original GitHub pull request
-#   lang   – detected programming language
-DATASET_CONFIG = None   # no named config for this mirror
+DATASET_NAME = "fasterinnerlooper/codereviewer"
+# Each split lives in its own named config; the split key within each config
+# is always 'train'.  Configs confirmed from the dataset card:
+#   train_generation      → training examples
+#   validation_generation → validation examples
+#   test_generation       → test examples
+SPLIT_CONFIGS = {
+    "train":      "train_generation",
+    "validation": "validation_generation",
+    "test":       "test_generation",
+}
 
 RANDOM_SEED  = 42
 TRAIN_RATIO  = 0.80
@@ -124,23 +126,35 @@ def write_jsonl(path: Path, examples: list) -> None:
 # ---------------------------------------------------------------------------
 
 print("=" * 65)
-cfg_label = f"config='{DATASET_CONFIG}'" if DATASET_CONFIG else "default config"
-print(f"Loading  {DATASET_NAME}  ({cfg_label}) …")
+print(f"Loading  {DATASET_NAME} …")
 print("=" * 65)
 
-try:
-    # Pass config only when one is specified — fasterinnerlooper/codereviewer
-    # is a flat single-config dataset and errors if given an unexpected name.
-    if DATASET_CONFIG:
-        raw = load_dataset(DATASET_NAME, DATASET_CONFIG)
-    else:
-        raw = load_dataset(DATASET_NAME)
-except Exception as exc:
-    sys.exit(f"\nFailed to load dataset: {exc}\n"
-             "Make sure you have network access to huggingface.co and that\n"
-             "the 'datasets' package is installed (pip install datasets).")
+# Load each split from its own named config.  split='train' is the only
+# split key present inside each config; the logical label (train/validation/
+# test) comes from our SPLIT_CONFIGS dict, not the dataset's internal name.
+raw_splits: dict = {}
+for label, config in SPLIT_CONFIGS.items():
+    try:
+        raw_splits[label] = load_dataset(DATASET_NAME, config, split="train")
+        print(f"  ✓ {label:<12} config='{config}'  rows={len(raw_splits[label]):,}")
+    except Exception as exc:
+        sys.exit(
+            f"\nFailed to load config '{config}': {exc}\n"
+            "Make sure you have network access to huggingface.co and that\n"
+            "the 'datasets' package is installed (pip install datasets)."
+        )
 
-print(f"  Available splits: { {k: len(v) for k, v in raw.items()} }\n")
+# --- Print columns before any filtering so we can confirm field names -------
+first = next(iter(raw_splits.values()))
+print(f"\nColumns: {first.column_names}")
+print(f"{'─' * 65}")
+print("First row of train split (raw, before filtering):")
+for col, val in raw_splits["train"][0].items():
+    snippet = str(val)
+    if len(snippet) > 120:
+        snippet = snippet[:117] + "…"
+    print(f"  {col:<12} {snippet}")
+print(f"{'─' * 65}\n")
 
 # ---------------------------------------------------------------------------
 # 2. Filter and format (pool all original splits, re-split ourselves)
@@ -159,7 +173,7 @@ review_field_name = None
 
 print("Filtering and formatting …")
 
-for split_name, split in raw.items():
+for split_name, split in raw_splits.items():
     for row in tqdm(split, desc=f"  {split_name}", total=len(split), unit="ex"):
 
         d_name, diff   = resolve_field(row, DIFF_CANDIDATES)
@@ -232,7 +246,7 @@ print(f"  Wrote 10 samples           → {SAMPLE_PATH}")
 # 6. Summary report
 # ---------------------------------------------------------------------------
 
-total_raw = sum(len(v) for v in raw.values())
+total_raw = sum(len(v) for v in raw_splits.values())
 
 print()
 print("=" * 65)
