@@ -333,7 +333,6 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         report_to="none",       # swap to "mlflow" or "wandb" when tracking is ready
         run_name="reviewmind-sft",
         dataloader_num_workers=0,
-        group_by_length=True,   # batch similar-length sequences to reduce padding
         remove_unused_columns=False,
     )
 
