@@ -1,8 +1,9 @@
 """
 Day 3 – Data Preparation
-Loads microsoft/CodeReviewer 'code-review' config, applies quality filters,
-formats into instruction-tuning format, re-splits 80/10/10, and writes
-.jsonl files to data/splits/.
+Loads fasterinnerlooper/codereviewer (publicly accessible mirror of the
+Microsoft CodeReviewer corpus), applies quality filters, formats into
+instruction-tuning format, re-splits 80/10/10, and writes .jsonl files
+to data/splits/.
 """
 
 import json
@@ -28,10 +29,15 @@ from datasets import load_dataset
 # Constants
 # ---------------------------------------------------------------------------
 
-DATASET_NAME   = "microsoft/CodeReviewer"
-# The 'code-review' config maps: diff → review comment (our fine-tuning task).
-# The 'code-change' config maps: diff+comment → revised code (different task).
-DATASET_CONFIG = "code-review"
+DATASET_NAME   = "fasterinnerlooper/codereviewer"
+# This is a publicly accessible mirror of the Microsoft CodeReviewer corpus.
+# It ships as a flat dataset (no named sub-configs) with columns:
+#   patch  – unified diff of the code change
+#   msg    – the human reviewer's comment
+#   label  – 1 if the patch received a comment, 0 otherwise
+#   url    – link to the original GitHub pull request
+#   lang   – detected programming language
+DATASET_CONFIG = None   # no named config for this mirror
 
 RANDOM_SEED  = 42
 TRAIN_RATIO  = 0.80
@@ -118,11 +124,17 @@ def write_jsonl(path: Path, examples: list) -> None:
 # ---------------------------------------------------------------------------
 
 print("=" * 65)
-print(f"Loading  {DATASET_NAME}  config='{DATASET_CONFIG}' …")
+cfg_label = f"config='{DATASET_CONFIG}'" if DATASET_CONFIG else "default config"
+print(f"Loading  {DATASET_NAME}  ({cfg_label}) …")
 print("=" * 65)
 
 try:
-    raw = load_dataset(DATASET_NAME, DATASET_CONFIG)
+    # Pass config only when one is specified — fasterinnerlooper/codereviewer
+    # is a flat single-config dataset and errors if given an unexpected name.
+    if DATASET_CONFIG:
+        raw = load_dataset(DATASET_NAME, DATASET_CONFIG)
+    else:
+        raw = load_dataset(DATASET_NAME)
 except Exception as exc:
     sys.exit(f"\nFailed to load dataset: {exc}\n"
              "Make sure you have network access to huggingface.co and that\n"
