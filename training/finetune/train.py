@@ -352,7 +352,6 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         processing_class=tokenizer,
-        max_seq_length=tcfg["max_seq_length"],
         # packing=False: do not concatenate short examples across sequence
         # boundaries — cleaner for variable-length code reviews
         packing=False,
@@ -388,6 +387,8 @@ def main() -> None:
     # ── 3. Load base model + tokenizer ──────────────────────────
     print(f"\n[3/6] Loading model: {cfg['model']['model_name']} …")
     model, tokenizer = load_model_and_tokenizer(cfg["model"]["model_name"], bnb_config)
+    tokenizer.model_max_length = cfg["training"]["max_seq_length"]
+    print(f"  tokenizer.model_max_length set to {tokenizer.model_max_length}")
 
     # ── 4. Apply LoRA adapter ────────────────────────────────────
     print("\n[4/6] Applying LoRA adapter …")
