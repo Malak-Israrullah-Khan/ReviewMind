@@ -9,8 +9,7 @@ quantization:
   # double quantization: quantize the quantization constants themselves,
   # saving an extra ~0.4 bits/param
   bnb_4bit_use_double_quant: true
-  # compute dtype is float16 for the forward/backward pass even though
-  # weights are stored in 4-bit
+  # float16 for the forward/backward pass — T4 GPUs do not support bfloat16
   bnb_4bit_compute_dtype: "float16"
 
 lora:

@@ -368,8 +368,8 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         lr_scheduler_type=tcfg["lr_scheduler_type"],
         warmup_steps=warmup_steps,
 
-        # Precision — fp16 matches the bnb compute dtype
-        fp16=tcfg["fp16"],
+        # T4 GPUs do not support bf16; force fp16 for both training and BnB compute.
+        fp16=True,
         bf16=False,
 
         # Checkpointing and evaluation
