@@ -373,9 +373,11 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         metric_for_best_model="eval_loss",
         greater_is_better=False,
 
-        # Fused AdamW keeps all optimizer state in fp16 and avoids the
-        # accelerate GradScaler issue tied to bf16 scalers on T4.
-        optim="adamw_torch_fused",
+        optim="adamw_torch",
+        fp16_full_eval=False,       # do not cast eval to fp16 — avoids bf16 scaler errors
+        ddp_find_unused_parameters=False,
+        skip_memory_metrics=True,   # disables the grad scaler memory tracking that triggers bf16
+        torch_compile=False,        # keep eager mode; compile can reintroduce dtype issues
 
         # Misc
         report_to="none",       # swap to "mlflow" or "wandb" when tracking is ready
