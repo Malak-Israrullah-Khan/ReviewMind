@@ -16,6 +16,7 @@ import os
 import sys
 from pathlib import Path
 
+import torch
 import yaml
 
 # ---------------------------------------------------------------------------
@@ -372,6 +373,10 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         metric_for_best_model="eval_loss",
         greater_is_better=False,
 
+        # Use the native PyTorch AdamW — avoids the accelerate GradScaler issue
+        # that surfaces when the default optimizer tries to handle bf16 scalers.
+        optim="adamw_torch",
+
         # Misc
         report_to="none",       # swap to "mlflow" or "wandb" when tracking is ready
         run_name="reviewmind-sft",
@@ -475,6 +480,10 @@ def main() -> None:
     model, tokenizer = load_model_and_tokenizer(cfg["model"]["model_name"], bnb_config)
     tokenizer.model_max_length = cfg["training"]["max_seq_length"]
     print(f"  tokenizer.model_max_length set to {tokenizer.model_max_length}")
+
+    # Cast any layers that loaded in bfloat16 (e.g. embed/lm_head) to float16
+    # before applying LoRA — T4 does not support bfloat16 at all.
+    model = model.to(torch.float16)
 
     # ── 4. Apply LoRA adapter ────────────────────────────────────
     print("\n[4/6] Applying LoRA adapter …")
