@@ -391,7 +391,7 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
-        processing_class=tokenizer,
+        tokenizer=tokenizer,
     )
 
     return trainer
