@@ -44,3 +44,9 @@ data:
   validation_file: "validation.jsonl"
   test_file: "test.jsonl"
   text_column: "text"
+
+hub:
+  # Set to your HuggingFace username/repo-name before running training.
+  # The merged fp16 model will be pushed here as a private repo.
+  repo_id: "your-hf-username/reviewmind-llama-3.1-8b"
+  push_to_hub: true

@@ -7,9 +7,12 @@ Usage:
     python training/finetune/train.py                  # full training run
     python training/finetune/train.py --dry-run        # validate setup, no training
     python training/finetune/train.py --config path/to/other.yaml
+    python training/finetune/train.py --no-push-hub    # skip HF Hub upload
+    python training/finetune/train.py --hf-repo username/my-model
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +24,9 @@ import yaml
 # train.py lives at  <project_root>/training/finetune/train.py
 # so parent.parent.parent == project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Colab Google Drive checkpoint directory
+GDRIVE_CHECKPOINT_DIR = "/content/drive/MyDrive/ReviewMind/checkpoints/"
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +51,23 @@ def parse_args() -> argparse.Namespace:
             "print the setup summary but do not call trainer.train()."
         ),
     )
+    parser.add_argument(
+        "--hf-repo",
+        default=None,
+        metavar="USERNAME/REPO",
+        help="HuggingFace Hub repo ID. Overrides config hub.repo_id.",
+    )
+    parser.add_argument(
+        "--hf-token",
+        default=None,
+        metavar="TOKEN",
+        help="HuggingFace Hub write token. Falls back to $HF_TOKEN env var.",
+    )
+    parser.add_argument(
+        "--no-push-hub",
+        action="store_true",
+        help="Skip pushing the merged model to HuggingFace Hub after training.",
+    )
     return parser.parse_args()
 
 
@@ -66,6 +89,27 @@ def resolve_path(raw: str) -> Path:
     """Return an absolute path; relative paths are resolved from PROJECT_ROOT."""
     p = Path(raw)
     return p if p.is_absolute() else PROJECT_ROOT / p
+
+
+# ---------------------------------------------------------------------------
+# Google Drive mounting (Colab only)
+# ---------------------------------------------------------------------------
+
+def mount_google_drive() -> Path | None:
+    """
+    Mount Google Drive when running in Google Colab and return the checkpoint
+    directory path.  Returns None outside Colab so local runs are unaffected.
+    """
+    try:
+        from google.colab import drive  # type: ignore[import]
+        drive.mount("/content/drive")
+        gdrive_dir = Path(GDRIVE_CHECKPOINT_DIR)
+        gdrive_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  Google Drive mounted. Checkpoints → {gdrive_dir}")
+        return gdrive_dir
+    except ImportError:
+        print("  Not running in Colab — skipping Drive mount.")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -279,8 +323,7 @@ def load_splits(dcfg: dict):
 def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bool):
     """
     SFTTrainer (from TRL) wraps HuggingFace Trainer with conveniences for
-    instruction fine-tuning: it handles packing and integrates cleanly with
-    PEFT adapters.
+    instruction fine-tuning: it integrates cleanly with PEFT adapters.
 
     Key scheduler choices:
       • cosine LR decay: smoother than linear; prevents the LR dropping to
@@ -358,6 +401,55 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
 
 
 # ---------------------------------------------------------------------------
+# HuggingFace Hub — merge adapter and push full model
+# ---------------------------------------------------------------------------
+
+def push_merged_model_to_hub(
+    adapter_dir: Path,
+    model_name: str,
+    repo_id: str,
+    hf_token: str,
+) -> None:
+    """
+    Reload the base model in fp16 (no quantization), merge the saved LoRA
+    adapter into it, then upload the merged weights and tokenizer to the Hub.
+
+    Why reload instead of merging in-place?  The training model is quantized
+    to 4-bit — merge_and_unload() on a quantized model produces dequantized
+    weights that differ from a clean fp16 merge.  Reloading in fp16 gives a
+    clean, reproducible merged checkpoint that downstream users can load
+    without bitsandbytes.
+    """
+    import torch
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    print("\n" + "=" * 55)
+    print("  Merging adapter and pushing to HuggingFace Hub")
+    print("=" * 55)
+
+    print(f"\nReloading base model in fp16 for merge: {model_name} …")
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.float16,
+        device_map="auto",
+        trust_remote_code=False,
+    )
+
+    print(f"Merging LoRA adapter from {adapter_dir} …")
+    peft_model = PeftModel.from_pretrained(base_model, str(adapter_dir))
+    merged_model = peft_model.merge_and_unload()
+
+    print(f"Pushing merged model → https://huggingface.co/{repo_id} …")
+    merged_model.push_to_hub(repo_id, token=hf_token, private=True)
+
+    tokenizer = AutoTokenizer.from_pretrained(str(adapter_dir))
+    tokenizer.push_to_hub(repo_id, token=hf_token)
+
+    print(f"\n  ✓ Model available at https://huggingface.co/{repo_id}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -369,6 +461,13 @@ def main() -> None:
     print("  ReviewMind — QLoRA Fine-Tuning Setup")
     print("  Dry-run mode" if args.dry_run else "  TRAINING MODE")
     print("=" * 55)
+
+    # ── 0. Mount Google Drive (Colab only) ───────────────────────
+    print("\n[0] Checking Google Drive …")
+    gdrive_dir = mount_google_drive()
+    if gdrive_dir is not None:
+        cfg["training"]["output_dir"] = str(gdrive_dir)
+        print(f"  output_dir overridden → {gdrive_dir}")
 
     # ── 1. GPU check ────────────────────────────────────────────
     print("\n[1/6] Checking GPU availability …")
@@ -444,6 +543,40 @@ def main() -> None:
     trainer.model.save_pretrained(str(adapter_dir))
     tokenizer.save_pretrained(str(adapter_dir))
     print(f"\nFinal adapter saved to: {adapter_dir}")
+
+    # ── Push merged model to HuggingFace Hub ────────────────────
+    if args.no_push_hub:
+        print("\nSkipping Hub push (--no-push-hub).")
+        return
+
+    hub_cfg = cfg.get("hub", {})
+    repo_id = args.hf_repo or hub_cfg.get("repo_id")
+    push_to_hub = hub_cfg.get("push_to_hub", True)
+
+    if not push_to_hub:
+        print("\nSkipping Hub push (hub.push_to_hub=false in config).")
+        return
+
+    if not repo_id:
+        print(
+            "\nNo Hub repo configured — skipping push.\n"
+            "  Set hub.repo_id in the config or pass --hf-repo username/repo-name."
+        )
+        return
+
+    hf_token = (
+        args.hf_token
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    )
+    if not hf_token:
+        print(
+            "\nNo HuggingFace token found — skipping push.\n"
+            "  Set the $HF_TOKEN environment variable or pass --hf-token TOKEN."
+        )
+        return
+
+    push_merged_model_to_hub(adapter_dir, cfg["model"]["model_name"], repo_id, hf_token)
 
 
 if __name__ == "__main__":
