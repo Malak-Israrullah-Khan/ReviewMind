@@ -392,6 +392,8 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         tokenizer=tokenizer,
+        dataset_text_field="text",
+        max_seq_length=tcfg["max_seq_length"],
     )
 
     return trainer
