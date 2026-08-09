@@ -329,20 +329,12 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
     output_dir = resolve_path(tcfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Recent TRL versions dropped dataset_text_field in favour of receiving a
-    # dataset that already has a single 'text' column.  Map here so the trainer
-    # sees exactly one column regardless of what else the source dataset carries.
-    text_col = dcfg["text_column"]
-    def keep_text(example):
-        return {"text": example[text_col]}
-
-    train_ds = dataset["train"].map(keep_text, remove_columns=dataset["train"].column_names)
-    eval_ds  = dataset["validation"].map(keep_text, remove_columns=dataset["validation"].column_names)
-
+    # SFTTrainer with dataset_text_field='text' tokenizes the raw dataset itself.
+    # Pre-mapping to a single column caused nested-list collation errors.
     # Compute warmup_steps from warmup_ratio so we avoid the deprecated
     # warmup_ratio kwarg in Transformers 5.x (removed in favour of explicit steps).
     eff_batch      = tcfg["batch_size"] * tcfg["gradient_accumulation_steps"]
-    total_steps    = (len(train_ds) // eff_batch) * tcfg["epochs"]
+    total_steps    = (len(dataset["train"]) // eff_batch) * tcfg["epochs"]
     warmup_steps   = max(1, int(total_steps * tcfg["warmup_ratio"]))
 
     training_args = TrainingArguments(
@@ -383,14 +375,14 @@ def build_trainer(model, tokenizer, dataset, tcfg: dict, dcfg: dict, dry_run: bo
         report_to="none",       # swap to "mlflow" or "wandb" when tracking is ready
         run_name="reviewmind-sft",
         dataloader_num_workers=0,
-        remove_unused_columns=False,
+        remove_unused_columns=True,
     )
 
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=train_ds,
-        eval_dataset=eval_ds,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["validation"],
         tokenizer=tokenizer,
         dataset_text_field="text",
         max_seq_length=tcfg["max_seq_length"],
