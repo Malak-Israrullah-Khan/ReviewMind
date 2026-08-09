@@ -97,19 +97,19 @@ def resolve_path(raw: str) -> Path:
 
 def mount_google_drive() -> Path | None:
     """
-    Mount Google Drive when running in Google Colab and return the checkpoint
-    directory path.  Returns None outside Colab so local runs are unaffected.
+    Check whether Google Drive is already mounted at /content/drive/MyDrive
+    and return the checkpoint directory path if so.  Drive must be mounted
+    manually by the user before running the script.  Returns None if the
+    mount point does not exist, falling back to local checkpoint saving.
     """
-    try:
-        from google.colab import drive  # type: ignore[import]
-        drive.mount("/content/drive")
+    gdrive_root = Path("/content/drive/MyDrive")
+    if gdrive_root.exists():
         gdrive_dir = Path(GDRIVE_CHECKPOINT_DIR)
         gdrive_dir.mkdir(parents=True, exist_ok=True)
-        print(f"  Google Drive mounted. Checkpoints → {gdrive_dir}")
+        print(f"  Google Drive detected. Checkpoints → {gdrive_dir}")
         return gdrive_dir
-    except ImportError:
-        print("  Not running in Colab — skipping Drive mount.")
-        return None
+    print("  /content/drive/MyDrive not found — saving checkpoints locally.")
+    return None
 
 
 # ---------------------------------------------------------------------------
