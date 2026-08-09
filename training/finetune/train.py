@@ -147,21 +147,11 @@ def build_bnb_config(qcfg: dict):
     import torch
     from transformers import BitsAndBytesConfig
 
-    dtype_map = {
-        "float16":  torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32":  torch.float32,
-    }
-    compute_dtype_str = qcfg.get("bnb_4bit_compute_dtype", "float16")
-    compute_dtype = dtype_map.get(compute_dtype_str)
-    if compute_dtype is None:
-        sys.exit(f"Unknown bnb_4bit_compute_dtype: '{compute_dtype_str}'")
-
     return BitsAndBytesConfig(
         load_in_4bit=qcfg["load_in_4bit"],
         bnb_4bit_quant_type=qcfg["bnb_4bit_quant_type"],
         bnb_4bit_use_double_quant=qcfg["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=compute_dtype,
+        bnb_4bit_compute_dtype=torch.float16,  # T4 does not support bfloat16
     )
 
 
