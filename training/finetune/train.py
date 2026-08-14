@@ -445,6 +445,8 @@ def push_merged_model_to_hub(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
     args = parse_args()
     cfg  = load_config(args.config)
 

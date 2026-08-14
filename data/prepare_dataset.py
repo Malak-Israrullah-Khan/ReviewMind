@@ -46,6 +46,8 @@ TRAIN_RATIO  = 0.80
 VAL_RATIO    = 0.10
 # test = remaining 10 %
 
+TRAIN_CAP = 10_000   # limit training examples for faster Colab runs
+
 MIN_DIFF_CHARS   = 20   # shorter diffs carry almost no signal
 MIN_REVIEW_CHARS = 10   # very short reviews are usually noise
 
@@ -216,7 +218,7 @@ n       = len(kept)
 n_train = int(n * TRAIN_RATIO)
 n_val   = int(n * VAL_RATIO)
 
-train_data = kept[:n_train]
+train_data = kept[:min(n_train, TRAIN_CAP)]
 val_data   = kept[n_train : n_train + n_val]
 test_data  = kept[n_train + n_val :]
 
