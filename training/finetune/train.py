@@ -69,6 +69,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip pushing the merged model to HuggingFace Hub after training.",
     )
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        default=None,
+        metavar="PATH",
+        help="Path to a checkpoint directory to resume training from.",
+    )
     return parser.parse_args()
 
 
@@ -529,7 +535,7 @@ def main() -> None:
     print("  Starting training …")
     print("=" * 55 + "\n")
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
     # Save the final LoRA adapter weights (not the full merged model)
     adapter_dir = resolve_path(tcfg["output_dir"]) / "final_adapter"
