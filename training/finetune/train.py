@@ -535,13 +535,15 @@ def main() -> None:
     print("  Starting training …")
     print("=" * 55 + "\n")
 
-    # PyTorch 2.6 weights_only=True default blocks numpy RNG states in checkpoints.
-    import numpy
-    torch.serialization.add_safe_globals([
-        numpy.core.multiarray._reconstruct,
-        numpy.ndarray,
-        numpy.dtype,
-    ])
+    # Remove RNG state files from the checkpoint before resuming so torch.load
+    # never tries to deserialise numpy objects (broken in PyTorch 2.6 with
+    # weights_only=True). Skipping RNG state is harmless — training resumes
+    # from model weights and optimizer state as normal.
+    if args.resume_from_checkpoint:
+        import glob
+        for f in glob.glob(os.path.join(args.resume_from_checkpoint, "rng_state*.pth")):
+            os.remove(f)
+            print(f"  Removed RNG state file: {f}")
 
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
