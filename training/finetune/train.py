@@ -452,9 +452,6 @@ def push_merged_model_to_hub(
 
 def main() -> None:
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    # PyTorch 2.6 changed torch.load default to weights_only=True, which breaks
-    # loading RNG states (numpy arrays) from checkpoints. Opt out globally.
-    os.environ["TORCH_FORCE_WEIGHTS_ONLY_LOAD"] = "0"
 
     args = parse_args()
     cfg  = load_config(args.config)
@@ -537,6 +534,14 @@ def main() -> None:
     print("\n" + "=" * 55)
     print("  Starting training …")
     print("=" * 55 + "\n")
+
+    # PyTorch 2.6 weights_only=True default blocks numpy RNG states in checkpoints.
+    import numpy
+    torch.serialization.add_safe_globals([
+        numpy.core.multiarray._reconstruct,
+        numpy.ndarray,
+        numpy.dtype,
+    ])
 
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
