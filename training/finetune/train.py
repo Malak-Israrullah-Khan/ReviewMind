@@ -452,6 +452,9 @@ def push_merged_model_to_hub(
 
 def main() -> None:
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    # PyTorch 2.6 changed torch.load default to weights_only=True, which breaks
+    # loading RNG states (numpy arrays) from checkpoints. Opt out globally.
+    os.environ["TORCH_FORCE_WEIGHTS_ONLY_LOAD"] = "0"
 
     args = parse_args()
     cfg  = load_config(args.config)
