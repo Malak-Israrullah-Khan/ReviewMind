@@ -48,8 +48,8 @@ OUTPUT_DIR   = PROJECT_ROOT / "evaluation" / "results"
 OUTPUT_FILE  = OUTPUT_DIR / "agent_results.json"
 
 DEFAULT_N_EXAMPLES    = 5
-DEFAULT_MAX_ITER      = 6        # max tool calls before forcing Final Answer
-DEFAULT_MAX_NEW_TOKENS = 300
+DEFAULT_MAX_ITER      = 8        # max tool calls before forcing Final Answer
+DEFAULT_MAX_NEW_TOKENS = 400
 
 # ---------------------------------------------------------------------------
 # CVE knowledge base (dependency_checker)
@@ -591,11 +591,24 @@ def run_react_loop(
             trace.append({"step": n_steps + 1, "type": "final_answer",
                           "content": raw_out})
             final_review = _extract_final_review(raw_out)
+            break  # prevent else clause from overwriting final_review
 
     else:
-        final_review = {"summary": "Max iterations reached without Final Answer.",
-                        "issues": [], "security_concerns": [],
-                        "code_quality": "N/A", "recommendations": []}
+        # Loop exhausted without any Final Answer — extract the best available
+        # text from the last meaningful trace step rather than returning blanks.
+        summary_text = "Max iterations reached without Final Answer."
+        for step in reversed(trace):
+            candidate = step.get("content") or step.get("observation", "")
+            if candidate and len(candidate) > 20:
+                summary_text = candidate[:1000].strip()
+                break
+        final_review = {
+            "summary": summary_text,
+            "issues": [],
+            "security_concerns": [],
+            "code_quality": "Review incomplete — extracted from last trace step.",
+            "recommendations": [],
+        }
 
     return {
         "trace":        trace,
