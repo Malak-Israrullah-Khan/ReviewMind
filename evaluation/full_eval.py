@@ -80,6 +80,38 @@ _LABELS = {
 from evaluation.score_cot import score_response, total as score_total  # noqa: E402
 
 # ---------------------------------------------------------------------------
+# ROUGE-L scoring
+# ---------------------------------------------------------------------------
+
+def load_rouge_metric():
+    """Load the ROUGE metric from the evaluate library; returns None on failure."""
+    try:
+        import evaluate as hf_evaluate
+        metric = hf_evaluate.load("rouge")
+        print("  ROUGE metric loaded.")
+        return metric
+    except Exception as exc:
+        print(f"  [ROUGE] evaluate library unavailable ({exc}).\n"
+              "  Install with:  pip install evaluate rouge_score\n"
+              "  ROUGE-L will be reported as 0.0.")
+        return None
+
+
+def rougel_per_example(metric, predictions: list[str],
+                       references: list[str]) -> list[float]:
+    """Return per-example ROUGE-L F1 scores (0.0 when metric or ref absent)."""
+    if metric is None:
+        return [0.0] * len(predictions)
+    scores: list[float] = []
+    for pred, ref in zip(predictions, references):
+        if not ref.strip():
+            scores.append(0.0)
+            continue
+        result = metric.compute(predictions=[pred], references=[ref])
+        scores.append(round(result["rougeL"], 4))
+    return scores
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -284,9 +316,15 @@ def _avg(values: list) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def print_comparison_table(per_version: dict[str, list[dict]], n: int) -> None:
+def print_comparison_table(
+    per_version: dict[str, list[dict]],
+    n: int,
+    rougel_avgs: dict[str, float] | None = None,
+) -> None:
     criteria = ["specificity", "actionability", "detail"]
-    col_w = 10
+    col_w  = 9
+    rl_w   = 9
+    width  = 84
 
     avgs: dict[str, dict[str, float]] = {}
     for v in VERSIONS:
@@ -296,18 +334,22 @@ def print_comparison_table(per_version: dict[str, list[dict]], n: int) -> None:
 
     base_total = avgs["base"]["total"]
 
-    print("\n" + "=" * 74)
+    show_rl = rougel_avgs is not None
+    rl_header = f" {'ROUGE-L':>{rl_w}}" if show_rl else ""
+
+    print("\n" + "=" * width)
     print(f"  FULL EVALUATION  (heuristic 1–5 per criterion · {n} examples)")
-    print("=" * 74)
+    print("=" * width)
     print(
         f"  {'Version':<26}"
         f" {'Spec':>{col_w}}"
         f" {'Action':>{col_w}}"
         f" {'Detail':>{col_w}}"
         f" {'Total/15':>{col_w}}"
+        f"{rl_header}"
         f"  vs Base"
     )
-    print("  " + "─" * 70)
+    print("  " + "─" * (width - 2))
 
     for v in VERSIONS:
         a = avgs[v]
@@ -319,16 +361,18 @@ def print_comparison_table(per_version: dict[str, list[dict]], n: int) -> None:
             sign  = "+" if delta >= 0 else ""
             arrow = " ▲" if delta > 0 else (" ▼" if delta < 0 else " =")
             delta_str = f"{sign}{delta:.2f}"
+        rl_cell = f" {rougel_avgs[v]:>{rl_w}.4f}" if show_rl else ""
         print(
             f"  {_LABELS[v]:<26}"
             f" {a['specificity']:>{col_w}.2f}"
             f" {a['actionability']:>{col_w}.2f}"
             f" {a['detail']:>{col_w}.2f}"
             f" {a['total']:>{col_w}.2f}"
+            f"{rl_cell}"
             f"  {delta_str}{arrow}"
         )
 
-    print("=" * 74)
+    print("=" * width)
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +381,7 @@ def print_comparison_table(per_version: dict[str, list[dict]], n: int) -> None:
 
 def rescore_existing(input_path: Path, output_path: Path) -> None:
     """Load an existing full_comparison.json, re-score all responses with the
-    current scoring functions, overwrite the file, and print the table."""
+    current scoring functions + ROUGE-L, overwrite the file, print table."""
     if not input_path.exists():
         sys.exit(f"\nFile not found: {input_path}\nRun full_eval.py without --rescore-only first.")
 
@@ -345,7 +389,9 @@ def rescore_existing(input_path: Path, output_path: Path) -> None:
         results = json.load(fh)
 
     print(f"Loaded {len(results)} entries from {input_path}")
-    print("Re-scoring with updated heuristics …\n")
+    print("Loading ROUGE metric …")
+    rouge_metric = load_rouge_metric()
+    print("Re-scoring with updated heuristics + ROUGE-L …\n")
 
     per_version: dict[str, list[dict]] = {v: [] for v in VERSIONS}
 
@@ -369,12 +415,28 @@ def rescore_existing(input_path: Path, output_path: Path) -> None:
         per_version["cot"].append(sc_cot)
         per_version["rag"].append(sc_rag)
 
+    # ROUGE-L (batch compute after loop to reuse loaded metric)
+    refs = [r.get("reference", "") for r in results]
+    rl = {
+        "base":      rougel_per_example(rouge_metric, [r["base_response"]      for r in results], refs),
+        "finetuned": rougel_per_example(rouge_metric, [r["finetuned_response"] for r in results], refs),
+        "cot":       rougel_per_example(rouge_metric, [r["cot_response"]       for r in results], refs),
+        "rag":       rougel_per_example(rouge_metric, [r["rag_response"]       for r in results], refs),
+    }
+    for i, r in enumerate(results):
+        r["base_rougeL"]      = rl["base"][i]
+        r["finetuned_rougeL"] = rl["finetuned"][i]
+        r["cot_rougeL"]       = rl["cot"][i]
+        r["rag_rougeL"]       = rl["rag"][i]
+
+    rougel_avgs = {v: _avg(rl[v]) for v in VERSIONS}
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2, ensure_ascii=False)
     print(f"Updated scores saved → {output_path}")
 
-    print_comparison_table(per_version, len(results))
+    print_comparison_table(per_version, len(results), rougel_avgs)
 
     print("  Average response lengths:")
     for v, key in [
@@ -415,17 +477,21 @@ def main() -> None:
     print(f"  Output        : {output_path}")
 
     # ── Dataset ─────────────────────────────────────────────────────────────
-    print("\n[1/5] Loading test examples …")
+    print("\n[1/6] Loading test examples …")
     examples = load_test_examples(TEST_JSONL, args.n_examples)
     if not examples:
         sys.exit("No valid examples found — aborting.")
 
+    # ── ROUGE metric ─────────────────────────────────────────────────────────
+    print("\n[2/6] Loading ROUGE metric …")
+    rouge_metric = load_rouge_metric()
+
     # ── RAG retriever ────────────────────────────────────────────────────────
-    print("\n[2/5] Initialising RAG retriever …")
+    print("\n[3/6] Initialising RAG retriever …")
     retriever = init_retriever(args.no_rag)
 
     # ── Base model ───────────────────────────────────────────────────────────
-    print("\n[3/5] Loading base model (no adapter) …")
+    print("\n[4/6] Loading base model (no adapter) …")
     base_model, tokenizer = load_base(args.base_model)
 
     # Pass 1: generate base-only responses before the adapter is attached.
@@ -440,11 +506,11 @@ def main() -> None:
         print(f"    [{i + 1:>2}/{len(examples)}] {len(resp.split())}w  {time.time()-t0:.0f}s")
 
     # ── Fine-tuned model ─────────────────────────────────────────────────────
-    print("\n[4/5] Attaching LoRA adapter …")
+    print("\n[5/6] Attaching LoRA adapter …")
     ft_model = attach_adapter(base_model, args.adapter_repo)
 
     # Pass 2: fine-tuned, CoT, RAG responses
-    print(f"\n[5/5] Generating fine-tuned / CoT / RAG responses "
+    print(f"\n[6/6] Generating fine-tuned / CoT / RAG responses "
           f"({len(examples)} examples × 3 variants) …\n")
 
     results: list[dict] = []
@@ -515,6 +581,23 @@ def main() -> None:
             "rag_total":          score_total(sc_rag),
         })
 
+    # ── ROUGE-L (batch after loop so metric is called minimally) ─────────────
+    print("\nComputing ROUGE-L scores …")
+    refs = [r["reference"] for r in results]
+    rl = {
+        "base":      rougel_per_example(rouge_metric, [r["base_response"]      for r in results], refs),
+        "finetuned": rougel_per_example(rouge_metric, [r["finetuned_response"] for r in results], refs),
+        "cot":       rougel_per_example(rouge_metric, [r["cot_response"]       for r in results], refs),
+        "rag":       rougel_per_example(rouge_metric, [r["rag_response"]       for r in results], refs),
+    }
+    for i, r in enumerate(results):
+        r["base_rougeL"]      = rl["base"][i]
+        r["finetuned_rougeL"] = rl["finetuned"][i]
+        r["cot_rougeL"]       = rl["cot"][i]
+        r["rag_rougeL"]       = rl["rag"][i]
+
+    rougel_avgs = {v: _avg(rl[v]) for v in VERSIONS}
+
     # ── Save ─────────────────────────────────────────────────────────────────
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
@@ -522,7 +605,7 @@ def main() -> None:
     print(f"\nResults saved → {output_path}  ({len(results)} entries)")
 
     # ── Comparison table ──────────────────────────────────────────────────────
-    print_comparison_table(per_version, len(results))
+    print_comparison_table(per_version, len(results), rougel_avgs)
 
     # ── Word-count summary ────────────────────────────────────────────────────
     print("  Average response lengths:")
