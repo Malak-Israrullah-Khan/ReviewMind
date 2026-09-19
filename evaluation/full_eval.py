@@ -99,6 +99,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output",         default=str(OUTPUT_FILE))
     parser.add_argument("--no-rag",         action="store_true",
                         help="Skip RAG version (use when vectorstore is absent).")
+    parser.add_argument("--rescore-only",   action="store_true",
+                        help="Re-score an existing full_comparison.json with the "
+                             "current scoring functions; skip all model loading.")
     return parser.parse_args()
 
 
@@ -329,12 +332,77 @@ def print_comparison_table(per_version: dict[str, list[dict]], n: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rescore-only mode
+# ---------------------------------------------------------------------------
+
+def rescore_existing(input_path: Path, output_path: Path) -> None:
+    """Load an existing full_comparison.json, re-score all responses with the
+    current scoring functions, overwrite the file, and print the table."""
+    if not input_path.exists():
+        sys.exit(f"\nFile not found: {input_path}\nRun full_eval.py without --rescore-only first.")
+
+    with input_path.open(encoding="utf-8") as fh:
+        results = json.load(fh)
+
+    print(f"Loaded {len(results)} entries from {input_path}")
+    print("Re-scoring with updated heuristics …\n")
+
+    per_version: dict[str, list[dict]] = {v: [] for v in VERSIONS}
+
+    for r in results:
+        sc_base = score_response(r["base_response"])
+        sc_ft   = score_response(r["finetuned_response"])
+        sc_cot  = score_response(r["cot_response"])
+        sc_rag  = score_response(r["rag_response"])
+
+        r["base_scores"]      = sc_base
+        r["finetuned_scores"] = sc_ft
+        r["cot_scores"]       = sc_cot
+        r["rag_scores"]       = sc_rag
+        r["base_total"]       = score_total(sc_base)
+        r["finetuned_total"]  = score_total(sc_ft)
+        r["cot_total"]        = score_total(sc_cot)
+        r["rag_total"]        = score_total(sc_rag)
+
+        per_version["base"].append(sc_base)
+        per_version["finetuned"].append(sc_ft)
+        per_version["cot"].append(sc_cot)
+        per_version["rag"].append(sc_rag)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as fh:
+        json.dump(results, fh, indent=2, ensure_ascii=False)
+    print(f"Updated scores saved → {output_path}")
+
+    print_comparison_table(per_version, len(results))
+
+    print("  Average response lengths:")
+    for v, key in [
+        ("base",      "base_response"),
+        ("finetuned", "finetuned_response"),
+        ("cot",       "cot_response"),
+        ("rag",       "rag_response"),
+    ]:
+        avg_w = _avg([len(r[key].split()) for r in results])
+        print(f"    {_LABELS[v]}  {avg_w:.0f} words")
+    print()
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     args = parse_args()
     output_path = Path(args.output)
+
+    if args.rescore_only:
+        print("\n" + "=" * 74)
+        print("  ReviewMind – Rescore Existing Results")
+        print("=" * 74)
+        print(f"  Input  : {output_path}")
+        rescore_existing(output_path, output_path)
+        return
 
     print("\n" + "=" * 74)
     print("  ReviewMind – Full 4-Way Evaluation")
