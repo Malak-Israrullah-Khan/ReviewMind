@@ -217,8 +217,7 @@ def print_param_summary(model) -> None:
 # ---------------------------------------------------------------------------
 
 def build_dpo_trainer(model, tokenizer, train_dataset, eval_dataset):
-    from transformers import TrainingArguments
-    from trl import DPOTrainer
+    from trl import DPOConfig, DPOTrainer
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -226,7 +225,7 @@ def build_dpo_trainer(model, tokenizer, train_dataset, eval_dataset):
     total_steps  = (len(train_dataset) // eff_batch) * EPOCHS
     warmup_steps = max(1, int(total_steps * WARMUP_RATIO))
 
-    training_args = TrainingArguments(
+    dpo_config = DPOConfig(
         output_dir=str(OUTPUT_DIR),
 
         per_device_train_batch_size=BATCH_SIZE,
@@ -259,18 +258,20 @@ def build_dpo_trainer(model, tokenizer, train_dataset, eval_dataset):
         run_name="reviewmind-dpo",
         dataloader_num_workers=0,
         remove_unused_columns=False,  # DPOTrainer needs prompt/chosen/rejected columns
+
+        # DPO-specific hyperparameters
+        beta=BETA,
+        max_length=MAX_LENGTH,
+        max_prompt_length=MAX_PROMPT_LENGTH,
     )
 
     trainer = DPOTrainer(
         model=model,
         ref_model=None,       # None → DPOTrainer uses the frozen base layers as reference
-        args=training_args,
-        beta=BETA,
+        args=dpo_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
-        max_length=MAX_LENGTH,
-        max_prompt_length=MAX_PROMPT_LENGTH,
     )
 
     return trainer
