@@ -216,6 +216,7 @@ def _generate(prompt: str) -> str:
             max_new_tokens=_MAX_NEW_TOKENS,
             do_sample=False,
             temperature=1.0,
+            repetition_penalty=1.3,
             pad_token_id=tokenizer.eos_token_id,
         )
 
