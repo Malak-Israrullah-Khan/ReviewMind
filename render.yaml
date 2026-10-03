@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: reviewmind
+    env: python
+    buildCommand: pip install -r render/requirements.txt
+    startCommand: python render/app.py
+    envVars:
+      - key: HF_TOKEN
+        sync: false
