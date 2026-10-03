@@ -366,4 +366,4 @@ if __name__ == "__main__":
     _load_model()
     _load_retriever(no_rag=args.no_rag)
     app = build_ui()
-    app.launch(server_port=args.port, share=args.share)
+    app.launch(server_port=args.port, share=True, server_name="0.0.0.0")
